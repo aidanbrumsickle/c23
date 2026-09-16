@@ -79,7 +79,7 @@ MapStatus
 StrMap_delete(StrMap *map, StrSlice key);
 
 bool
-StrMap_next(MapIterator *it, Str *key, void **value)
+StrMap_next(MapIterator *it, Str *key, void **value);
 
 void
 StrMap_free(StrMap *map);

@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <string.h>
 #include "Str.h"
 #include "Hash.h"
 
@@ -116,12 +117,12 @@ sipHash24(StrSlice slice, const uint64_t k[static KeyLength])
     v[3] = k[1] ^ Initializer3;
 
     const size_t limit =
-        s.length >= BlockLength ? s.length - BlockLength + 1 : 0;
+        slice.length >= BlockLength ? slice.length - BlockLength + 1 : 0;
     size_t offset;
     for (offset = 0; offset < limit; offset += BlockLength) {
-        sipCompress2(v, fullBlock(slice.text + offset));
+        sipCompress2(v, fullBlock((uint8_t *)slice.text + offset));
     }
-    const uint8_t *s = slice.text + offset;
+    const uint8_t *s = (uint8_t *)slice.text + offset;
     size_t remainder = slice.length - offset;
     size_t lengthByte = slice.length & LowByteMask;
     sipCompress2(v, partialBlock(s, remainder, lengthByte));

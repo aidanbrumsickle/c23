@@ -39,18 +39,35 @@ Str_asSlice(Str str);
 Comparison
 StrSlice_compare(StrSlice s1, StrSlice s2);
 
+static inline Comparison
+StrSlice_compareStr(StrSlice s1, Str s2)
+{
+    return StrSlice_compare(s1, Str_asSlice(s2));
+}
+
+static inline Comparison
+Str_compare(Str s1, Str s2)
+{
+    return StrSlice_compare(Str_asSlice(s1), Str_asSlice(s2));
+}
+
+static inline Comparison
+Str_compareSlice(Str s1, StrSlice s2)
+{
+    return StrSlice_compare(Str_asSlice(s1), s2);
+}
+
 // Generic comparison between Str and/or StrSlice.
 // Arguments can be any combination of Str and StrSlice.
 // Direct comparison with char* is not supported.
 #define strCompare(s1, s2) \
-    _Generic(s1, \
-            StrSlice : _Generic(s2, \
-                StrSlice : StrSlice_compare(s1, s2), \
-                Str : StrSlice_compare(s1, Str_asSlice(s2))), \
+    _Generic((s1), \
+            StrSlice : _Generic((s2), \
+                StrSlice : StrSlice_compare, \
+                Str : StrSlice_compareStr), \
             Str : _Generic(s2, \
-                StrSlice : StrSlice_compare(Str_asSlice(s1), s2), \
-                Str : StrSlice_compare( \
-                    Str_asSlice(s1), Str_asSlice(s2)))) \
+                StrSlice : Str_compareSlice, \
+                Str : Str_compare))(s1, s2)
 
 // TODO StrSlice_compareIgnoreCase(s1, s2)
 

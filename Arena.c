@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stddef.h>
+#include <stdlib.h>
 #include "Arena.h"
 #include "Util.h"
 
@@ -90,14 +91,17 @@ Arena_initializeWithCapacity(Arena *arena, size_t capacity)
     }
     if (!capacity) {
         if (arena->maxCapacity) {
-
+            capacity = min(arena->maxCapacity, DefaultArenaCapacity);
+        } else {
+            capacity = DefaultArenaCapacity;
+        }
     }
-    capacity = capacity > 0 ? capacity : DefaultArenaCapacity;
     ArenaBlock *block = ArenaBlock_newWithCapacity(capacity);
     if (!block) {
         return Arena_OutOfMemory;
     }
     arena->head = block;
+    return Arena_Success;
 }
 
 ArenaStatusCode
@@ -142,7 +146,7 @@ Arena_allocateAlignedWithoutBlockAllocation(
         Arena *arena, size_t bytes, size_t alignment)
 {
     if (!arena) {
-        return (ArenaResult){
+        return (ArenaAllocationResult){
             .memory = nullptr,
             .status = Arena_NullPointer
         };
@@ -158,7 +162,6 @@ Arena_allocateAlignedWithoutBlockAllocation(
             continue;
         }
         size_t alignedBlockOffset = block->offset + padding;
-        void *alignedAllocatedMemory = &block->memory[alignedBlockOffset];
         block->offset = alignedBlockOffset + bytes;
         return (ArenaAllocationResult){
             .memory = &block->memory[alignedBlockOffset],
@@ -181,7 +184,7 @@ ArenaAllocationResult
 Arena_allocateAligned(Arena *arena, size_t bytes, size_t alignment)
 {
     if (!arena) {
-        return (ArenaResult){
+        return (ArenaAllocationResult){
             .memory = nullptr,
             .status = Arena_NullPointer
         };
@@ -280,7 +283,6 @@ Arena_takeSnapshotWithBufferNoCheck(Arena *arena, void *buffer)
     for (ArenaBlock *block = arena->head; block; block = block->next) {
         snapshot->offsets[snapshot->blockCount++] = block->offset;
     }
-    return snapshot;
 }
 
 // ASSUMES  buffer fits at least size bytes
@@ -322,7 +324,7 @@ Arena_takeSnapshot(Arena *arena)
         requiredBufferSize += sizeof(size_t);
     }
     ArenaAllocationResult allocResult =
-        Arena_allocAligned(arena, requiredBufferSize, alignof(size_t));
+        Arena_allocateAligned(arena, requiredBufferSize, alignof(size_t));
     if (allocResult.status != Arena_Success) {
         return (ArenaSnapshotResult){
             .snapshot = nullptr,

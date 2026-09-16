@@ -1,5 +1,7 @@
+#include <stdlib.h>
 #include <string.h>
 #include "Str.h"
+#include "Arena.h"
 #include "Util.h"
 
 StrSlice
@@ -17,7 +19,7 @@ StrSlice
 Str_slice(Str str, size_t from, size_t to)
 {
     if (str.length == 0) {
-        return str;
+        return (StrSlice){(const char *)str.text, 0};
     }
     from = min(from, str.length - 1);
     to = min(to, str.length);
@@ -38,10 +40,10 @@ StrSlice_compare(StrSlice s1, StrSlice s2)
     }
     size_t length = min(s1.length, s2.length);
     for (size_t i = 0; i < length; i++) {
-        if (s1[i] < s2[i]) {
+        if (s1.text[i] < s2.text[i]) {
             return LessThan;
         }
-        if (s1[i] > s2[i]) {
+        if (s1.text[i] > s2.text[i]) {
             return GreaterThan;
         }
     }
@@ -59,11 +61,11 @@ StrSlice_compare(StrSlice s1, StrSlice s2)
 StrSlice
 StrSlice_fromCStr(const char *string, size_t maxLength)
 {
-    if (!nulTerminatedString) {
+    if (!string) {
         return (StrSlice){nullptr, 0};
     }
-    size_t length = strnlen(nulTerminatedString);
-    return (StrSlice){nulTerminatedString, length};
+    size_t length = strnlen(string, maxLength);
+    return (StrSlice){string, length};
 }
 
 // Copy str using malloc.
@@ -114,7 +116,7 @@ Str
 Str_arenaCopyStr(Str str, Arena *arena)
 {
     ArenaAllocationResult result = Arena_allocate(arena, str.length + 1);
-    if (result != Arena_Success) {
+    if (result.status != Arena_Success) {
         return (Str){nullptr, 0};
     }
     char *textCopy = result.memory;
@@ -129,7 +131,7 @@ Str
 Str_arenaCopyStrSlice(StrSlice slice, Arena *arena)
 {
     ArenaAllocationResult result = Arena_allocate(arena, slice.length + 1);
-    if (result != Arena_Success) {
+    if (result.status != Arena_Success) {
         return (Str){nullptr, 0};
     }
     char *textCopy = result.memory;
@@ -145,7 +147,7 @@ Str_arenaCopyCStr(const char *string, size_t maxLength, Arena *arena)
 {
     size_t length = strnlen(string, maxLength);
     ArenaAllocationResult result = Arena_allocate(arena, length + 1);
-    if (result != Arena_Success) {
+    if (result.status != Arena_Success) {
         return (Str){nullptr, 0};
     }
     char *textCopy = result.memory;

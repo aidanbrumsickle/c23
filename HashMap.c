@@ -1,6 +1,6 @@
 #include <stdint.h>
-// TODO extract headers for all of these
-// need Str, Hash
+#include <stdlib.h>
+#include <string.h>
 #include "Arena.h"
 #include "Str.h"
 #include "Hash.h"
@@ -8,29 +8,6 @@
 
 constexpr int DefaultCapacity = 1024;
 constexpr int DefaultAlignment = 8;
-
-typedef enum : uint8_t {
-    EntryState_Empty = 1,
-    EntryState_Deleted = 2,
-    EmptyState_InUse = 4
-} EntryState;
-
-typedef enum {
-    Map_Success,
-    Map_NullPointer,
-    Map_OutOfMemory
-} MapStatus;
-
-typedef struct {
-    Str *keys;
-    EntryState *state;
-    void *values;
-    Arena arena;
-    size_t capacity;
-    size_t count;
-    size_t valueSize;
-    size_t valueAlignment;
-} StrMap;
 
 static inline size_t
 roundUpToPowerOfTwo(size_t n)
@@ -57,7 +34,7 @@ StrMap_initializeExceptForArena(StrMap *map)
         DefaultCapacity;
     size_t keyBytes = capacity * sizeof(Str);
     size_t stateBytes = capacity * sizeof(EntryState);
-    size_t valueBytes = capacity * init.valueSize;
+    size_t valueBytes = capacity * map->valueSize;
     size_t alignment = map->valueAlignment ? map->valueAlignment :
         map->valueSize < DefaultAlignment ? map->valueSize : DefaultAlignment;
     size_t totalBytes = keyBytes + stateBytes + valueBytes;
@@ -87,7 +64,7 @@ StrMap_initialize(StrMap *map)
         return status;
     }
     ArenaStatusCode arenaStatus = Arena_initialize(&map->arena);
-    if (status != Arena_Success) {
+    if (arenaStatus != Arena_Success) {
         free(map->keys);
         memset(map, 0, sizeof(StrMap));
         return Map_OutOfMemory;
@@ -100,7 +77,7 @@ StrMap_setNoCheck(StrMap *map, int i, Str key, void *value)
 {
     map->keys[i] = key;
     void *dest = (char *)map->values + i * map->valueSize;
-    memcpy(dest, src, map->valueSize);
+    memcpy(dest, value, map->valueSize);
     map->state[i] = EntryState_InUse;
 }
 
@@ -124,8 +101,8 @@ StrMap_lookupNoCheck(StrMap *map, StrSlice key)
     const uint32_t capacityMask = map->capacity - 1;
     uint32_t index = keyHash & capacityMask;
     if (map->state[index] == EntryState_Empty
-            || map->state[index] == EntryState_InUse
-            && strCompare(key, map->keys[index]) == EqualTo) {
+            || (map->state[index] == EntryState_InUse
+                && strCompare(key, map->keys[index]) == EqualTo)) {
         return index;
     }
     bool sawTombstone = map->state[index] == EntryState_Deleted;
