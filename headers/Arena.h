@@ -18,7 +18,8 @@ typedef enum {
     Arena_WouldRequireBlockAllocation,
     Arena_WouldExceedMaxCapacity,
     Arena_InsufficientSnapshotBufferSize,
-    Arena_InvalidSnapshot
+    Arena_InvalidSnapshot,
+    Arena_InvalidAlignment
 } ArenaStatusCode;
 
 typedef struct {

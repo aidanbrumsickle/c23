@@ -141,6 +141,7 @@ randomizeKey(uint64_t k[static KeyLength])
 }
 #elif defined(__linux__)
 #include <sys/random.h>
+#include <errno.h>
 #define NO_FLAGS 0
 void
 randomizeKey(uint64_t k[static KeyLength])

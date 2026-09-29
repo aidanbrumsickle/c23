@@ -4,7 +4,9 @@
 #include "Arena.h"
 #include "Util.h"
 
-#ifdef USE_TEST_MALLOC
+#ifdef UNIT_TEST
+#include <assert.h>
+#include "test_macros.h"
 #include "TestMalloc.h"
 #define MALLOC_FN testMalloc
 #define FREE_FN testFree
@@ -96,6 +98,9 @@ Arena_initializeWithCapacity(Arena *arena, size_t capacity)
             capacity = DefaultArenaCapacity;
         }
     }
+    if (arena->maxCapacity && capacity > arena->maxCapacity) {
+        capacity = arena->maxCapacity;
+    }
     ArenaBlock *block = ArenaBlock_newWithCapacity(capacity);
     if (!block) {
         return Arena_OutOfMemory;
@@ -104,11 +109,77 @@ Arena_initializeWithCapacity(Arena *arena, size_t capacity)
     return Arena_Success;
 }
 
+#ifdef UNIT_TEST
+TEST
+arenaInitializeNullptrShouldReturnErrCode()
+{
+    ArenaStatusCode status = Arena_initializeWithCapacity(nullptr, 1024);
+    assert(status == Arena_NullPointer);
+}
+
+TEST
+arenaInitializeMallocFailureShouldReturnErrCode()
+{
+    setMallocBehavior(AlwaysFail);
+    Arena arena = {};
+    ArenaStatusCode status = Arena_initializeWithCapacity(&arena, 1024);
+    assert(status == Arena_OutOfMemory);
+}
+
+TEST
+arenaInitializeShouldInitWithGivenCapacity()
+{
+    Arena arena = {};
+    (void)Arena_initializeWithCapacity(&arena, 1024 - sizeof(ArenaBlock));
+    assert(arena.head != nullptr);
+    assert(arena.head->capacity == 1024 - sizeof(ArenaBlock));
+    assert(arena.head->offset == 0);
+}
+
+TEST
+arenaInitializeShouldAllocateCorrectSize()
+{
+    setMallocBehavior(TrackMemoryUsage);
+    Arena arena = {};
+    (void)Arena_initializeWithCapacity(&arena, 1024 - sizeof(ArenaBlock));
+    size_t memoryUsed = getAllocatedMemory();
+    assert(memoryUsed == 1024);
+}
+
+TEST
+arenaInitializeWithCapacityGreaterThanMaxCapacityShouldUseMaxCapacity()
+{
+    Arena arena = {.maxCapacity = 256};
+    (void)Arena_initializeWithCapacity(&arena, 1024);
+    assert(arena.head != nullptr);
+    assert(arena.head->capacity == 256);
+}
+#endif
+
 ArenaStatusCode
 Arena_initialize(Arena *arena)
 {
     return Arena_initializeWithCapacity(arena, DefaultArenaCapacity);
 }
+
+#ifdef UNIT_TEST
+TEST
+arenaInitializationShouldSucceed()
+{
+    Arena arena;
+    ArenaStatusCode status = Arena_initialize(&arena);
+    assert(status == Arena_Success);
+}
+
+TEST
+arenaInitializeShouldUseDefaultCapacity()
+{
+    Arena arena;
+    (void)Arena_initialize(&arena);
+    assert(arena.head != nullptr);
+    assert(arena.head->capacity == DefaultArenaCapacity);
+}
+#endif
 
 ArenaStatusCode
 Arena_initializeFromStaticBuffer(Arena *arena, void *buffer, size_t bufferSize)
@@ -123,6 +194,50 @@ Arena_initializeFromStaticBuffer(Arena *arena, void *buffer, size_t bufferSize)
     arena->maxCapacity = block->capacity;
     return Arena_Success;
 }
+
+#ifdef UNIT_TEST
+TEST
+arenaInitFromStaticBufferShouldErrForNullArena()
+{
+    char buffer[1024];
+    ArenaStatusCode status =
+        Arena_initializeFromStaticBuffer(nullptr, buffer, 1024);
+    assert(status == Arena_NullPointer);
+}
+
+TEST
+arenaInitFromStaticBufferShouldErrForNullBuffer()
+{
+    Arena arena;
+    ArenaStatusCode status =
+        Arena_initializeFromStaticBuffer(&arena, nullptr, 1024);
+    assert(status == Arena_NullPointer);
+}
+
+TEST
+arenaInitFromStaticBufferShouldInitCorrectly()
+{
+    Arena arena;
+    char buffer[1024];
+    ArenaStatusCode status =
+        Arena_initializeFromStaticBuffer(&arena, buffer, 1024);
+    assert(status == Arena_Success);
+    assert(arena.maxCapacity == 1024 - sizeof(ArenaBlock));
+    assert(arena.head == (ArenaBlock *)buffer);
+    assert(arena.head->capacity == 1024 - sizeof(ArenaBlock));
+    assert(arena.head->offset == 0);
+}
+
+TEST
+arenaInitFromStaticBufferShouldNotMalloc()
+{
+    setMallocBehavior(TrackMemoryUsage);
+    Arena arena;
+    char buffer[1024];
+    (void)Arena_initializeFromStaticBuffer(&arena, buffer, 1024);
+    assert(getAllocatedMemory() == 0);
+}
+#endif
 
 size_t
 Arena_maxAvailableWithoutBlockAllocation(Arena *arena)
@@ -140,6 +255,12 @@ Arena_maxAvailableWithoutBlockAllocation(Arena *arena)
     return maxRemainingCapacity;
 }
 
+static inline bool
+isPowerOfTwo(size_t n)
+{
+    return (n & (n - 1)) == 0;
+}
+
 // alignment must be a power of two
 ArenaAllocationResult
 Arena_allocateAlignedWithoutBlockAllocation(
@@ -149,6 +270,12 @@ Arena_allocateAlignedWithoutBlockAllocation(
         return (ArenaAllocationResult){
             .memory = nullptr,
             .status = Arena_NullPointer
+        };
+    }
+    if (!isPowerOfTwo(alignment)) {
+        return (ArenaAllocationResult){
+            .memory = nullptr,
+            .status = Arena_InvalidAlignment
         };
     }
     for (ArenaBlock *block = arena->head; block; block = block->next) {
@@ -174,6 +301,87 @@ Arena_allocateAlignedWithoutBlockAllocation(
     };
 }
 
+#ifdef UNIT_TEST
+TEST
+allocAlignedWithoutBlockAllocNullArena()
+{
+    ArenaAllocationResult result =
+        Arena_allocateAlignedWithoutBlockAllocation(nullptr, 256, 4);
+    assert(result.status == Arena_NullPointer);
+    assert(result.memory == nullptr);
+}
+
+TEST
+allocAlignedWithoutBlockAllocInvalidAlignment()
+{
+    Arena arena = {};
+    Arena_initialize(&arena);
+    ArenaAllocationResult result =
+        Arena_allocateAlignedWithoutBlockAllocation(&arena, 256, 6);
+    assert(result.status == Arena_InvalidAlignment);
+    assert(result.memory == nullptr);
+}
+
+TEST
+allocAlignedWithoutBlockAllocNoPaddingRequired()
+{
+    Arena arena = {};
+    (void)Arena_initialize(&arena);
+    ArenaAllocationResult result =
+        Arena_allocateAlignedWithoutBlockAllocation(&arena, 256, 8);
+    assert(result.status == Arena_Success);
+    assert(result.memory == arena.head->memory);
+    assert(arena.head->offset == 256);
+}
+
+static inline bool
+hasAlignment(void *p, size_t alignment)
+{
+    return (((uintptr_t)p) & (alignment - 1)) == 0;
+}
+
+TEST
+allocAlignedWithoutBlockAllocRequiredPaddingAdded()
+{
+    Arena arena = {};
+    (void)Arena_initialize(&arena);
+    ArenaAllocationResult result1 =
+        Arena_allocateAlignedWithoutBlockAllocation(&arena, 19, 1);
+    assert(result1.status == Arena_Success);
+    assert(arena.head->offset == 19);
+    ArenaAllocationResult result2 =
+        Arena_allocateAlignedWithoutBlockAllocation(&arena, 64, 8);
+    assert(result2.status == Arena_Success);
+    assert(hasAlignment(result2.memory, 8));
+    assert(result2.memory == &arena.head->memory[24]);
+    assert(arena.head->offset == 24 + 64);
+}
+
+TEST
+allocAlignedWithoutBlockAllocTooBigWithoutPadding()
+{
+    Arena arena = {};
+    size_t capacity = 256 - sizeof(ArenaBlock);
+    (void)Arena_initializeWithCapacity(&arena, capacity);
+    ArenaAllocationResult result =
+        Arena_allocateAlignedWithoutBlockAllocation(&arena, capacity + 1, 1);
+    assert(result.status == Arena_WouldRequireBlockAllocation);
+}
+
+TEST
+allocAlignedWithoutBlockAllocTooBigWithPadding()
+{
+    Arena arena = {};
+    size_t capacity = 256 - sizeof(ArenaBlock);
+    (void)Arena_initializeWithCapacity(&arena, capacity);
+    // Ensure block memory start is not over-aligned
+    assert(!hasAlignment(arena.head->memory, 16));
+    ArenaAllocationResult result =
+        Arena_allocateAlignedWithoutBlockAllocation(&arena, capacity, 16);
+    assert(result.status == Arena_WouldRequireBlockAllocation);
+}
+#endif
+
 ArenaAllocationResult
 Arena_allocateWithoutBlockAllocation(Arena *arena, size_t bytes)
 {
@@ -195,8 +403,7 @@ Arena_allocateAligned(Arena *arena, size_t bytes, size_t alignment)
         size_t mask = alignment - 1;
         size_t padding =
             alignment - (offsetof(ArenaBlock, memory) & mask) & mask;
-        bytes += padding;
-        size_t capacity = adjustCapacity(bytes);
+        size_t capacity = adjustCapacity(bytes + padding);
         size_t minCapacity = DefaultArenaCapacity;
         if (arena->maxCapacity) {
             if (capacity > arena->maxCapacity) {
@@ -262,6 +469,15 @@ Arena_allocateAligned(Arena *arena, size_t bytes, size_t alignment)
         .status = Arena_Success
     };
 }
+
+#ifdef UNIT_TEST
+// TODO Null arena
+// TODO uninitialized arena malloc failure out of memory
+// TODO uninitialized arena with maxCapacity no padding would exceed
+// TODO uninitialized arena with maxCapacity padding would exceed
+// TODO unititialized arena with maxCapacity success
+// TODO uninitialized arena success
+#endif
 
 ArenaAllocationResult
 Arena_allocate(Arena *arena, size_t bytes)
@@ -390,3 +606,4 @@ Arena_free(Arena *arena)
     }
     arena->head = nullptr;
 }
+
